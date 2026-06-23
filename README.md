@@ -2,12 +2,16 @@
 
 基于 Python 的 AI Agent 工具框架，对标 Claude Code 工具系统设计。支持 LLM 对话、工具调用（Function Calling）、会话持久化，提供交互式命令行界面。
 
+> **版本**: 0.1.0 | **许可**: MIT | **测试**: 104 passed ✅
+
 ## 架构概览
 
 ```
 DScode/
 ├── agent/                  # Agent 核心 — 对话编排层
 │   └── agent.py            #   外层 REPL + 内层 Tool Calling 循环
+├── llmapi/                 # LLM 客户端 — OpenAI 兼容接口
+│   └── LLMAPI.py           #   流式响应、工具调用、推理链支持
 ├── tools/                  # 工具系统 — 16 个可扩展工具
 │   ├── base.py             #   BaseTool 抽象基类 + ToolResult 统一返回
 │   ├── registry.py         #   ToolRegistry 注册表（注册/查找/枚举/清空）
@@ -15,14 +19,19 @@ DScode/
 ├── session/                # 会话管理 — 持久化与恢复
 │   ├── models.py           #   Pydantic 数据模型（Message / Session）
 │   └── manager.py          #   SessionManager CRUD 操作
-├── llmapi/                 # LLM 客户端 — OpenAI 兼容接口
-│   └── LLMAPI.py           #   流式响应、工具调用、推理链支持
-├── config.py               # 配置管理 — 从 config.json 加载
-├── tests/                  # 单元测试 — 覆盖核心模块
+├── ui/                     # 终端 UI
+│   ├── input_handler.py    #   prompt-toolkit 输入封装（Tab 补全、多行）
+│   └── completer.py        #   自动补全器
+├── tests/                  # 单元测试 — 104 个测试全部通过
 ├── memory/sessions/        # 会话持久化存储（JSON 文件）
 ├── main.py                 # CLI 入口（argparse 子命令）
+├── config.py               # 配置管理 — 从 config.json 加载
+├── config.json.example     # 配置文件模板
 ├── pyproject.toml          # 项目元数据与依赖
-└── requirements.txt        # 锁定的依赖版本
+├── requirements.txt        # 锁定的依赖版本
+├── CLAUDE.md               # AI 助手指南
+├── ARCHITECTURE.md         # 英文架构文档
+└── 架构.md                 # 中文架构文档
 ```
 
 **核心流程**：用户输入 → Agent 调用 LLM → LLM 返回工具调用 → Agent 执行工具 → 结果回传 LLM → LLM 给出最终回复。
@@ -109,26 +118,47 @@ You: 帮我分析项目结构
 ...
 ```
 
-## 可用工具
+## 可用工具（16 个）
 
-| 工具 | 状态 | 说明 |
-|------|------|------|
-| `read_file` | ✅ 完整 | 读取文件内容，支持分页和行范围 |
-| `write_file` | ✅ 完整 | 写入内容到指定文件 |
-| `edit_file` | ✅ 完整 | 精确字符串替换编辑（单次/全部） |
-| `run_bash` | ✅ 完整 | 执行 Shell 命令，支持超时控制 |
-| `glob_search` | ✅ 完整 | Glob 模式匹配搜索文件 |
-| `grep_search` | ✅ 完整 | 正则表达式内容搜索（3 种输出模式） |
-| `web_fetch` | ✅ 完整 | 获取 URL 内容（HTTP/HTTPS） |
-| `web_search` | ✅ 完整  | 网络搜索（待对接搜索引擎 API） |
-| `ask_user` | ✅ 完整 | 向用户提问获取决策输入 |
-| `task_create` | ✅ 完整 | 创建结构化任务项 |
-| `task_update` | ✅ 完整 | 更新任务状态与信息 |
-| `start_agent` | ✅ 完整  | 启动子代理（待 Agent Runtime 实现） |
-| `use_skill` | ✅ 完整  | 调用技能命令 |
-| `enter_plan_mode` | ✅ 完整  | 进入计划模式 |
-| `create_cron` | ✅ 完整  | 创建定时任务 |
-| `run_workflow` | ✅ 完整  | 执行多代理工作流 |
+### 文件操作
+| 工具 | 说明 |
+|------|------|
+| `read_file` | 读取文件内容，支持分页和行范围 |
+| `write_file` | 写入内容到指定文件 |
+| `edit_file` | 精确字符串替换编辑（单次/全局替换） |
+
+### 系统命令
+| 工具 | 说明 |
+|------|------|
+| `run_bash` | 异步执行 Shell 命令，支持超时控制 |
+
+### 搜索工具
+| 工具 | 说明 |
+|------|------|
+| `glob_search` | Glob 模式匹配搜索文件 |
+| `grep_search` | 正则表达式内容搜索（content/files/count 三种模式） |
+| `web_fetch` | 获取 URL 内容并转换为 Markdown |
+| `web_search` | 网络搜索（DuckDuckGo / SerpAPI / Brave 多后端） |
+
+### 交互工具
+| 工具 | 说明 |
+|------|------|
+| `ask_user` | 向用户提问获取决策输入（单选/多选/自由输入） |
+
+### 任务管理
+| 工具 | 说明 |
+|------|------|
+| `task_create` | 创建结构化任务项，支持依赖追踪 |
+| `task_update` | 更新任务状态（pending→in_progress→completed），含状态转换校验 |
+
+### 高级编排
+| 工具 | 说明 |
+|------|------|
+| `start_agent` | 启动子代理（复用 Agent 实例，支持前台/后台模式） |
+| `use_skill` | 调用技能命令（SkillRegistry + `.claude/skills/` 动态加载） |
+| `enter_plan_mode` | 进入计划模式，拦截破坏性操作等待批准 |
+| `create_cron` | 创建定时任务（5 字段 Cron 表达式 + asyncio 调度器） |
+| `run_workflow` | 执行多代理工作流（DAG 拓扑排序 + 并行编排 + 断点续传） |
 
 ## 运行测试
 
@@ -136,7 +166,7 @@ You: 帮我分析项目结构
 # 安装开发依赖
 pip install -e ".[dev]"
 
-# 运行全部测试
+# 运行全部测试（104 个）
 pytest
 
 # 运行指定测试模块
@@ -151,9 +181,11 @@ pytest tests/test_session_manager.py::TestLoad -v
 ### 添加新工具
 
 1. 在 `tools/` 目录创建 `my_tool.py`
-2. 继承 `BaseTool`，实现 `execute()` 和 `get_schema()`
-3. 在 `tools/__init__.py` 中导出
-4. 在 `main.py` 的 `create_default_registry()` 中注册
+2. 继承 `BaseTool`，设置 `name` 和 `description`
+3. 实现 `async execute(**kwargs) → ToolResult`
+4. 实现 `get_schema() → dict`（返回 OpenAI function calling JSON Schema）
+5. 在 `tools/__init__.py` 中导出类
+6. 在 `main.py` 的 `create_default_registry()` 中注册
 
 ```python
 # tools/my_tool.py
@@ -184,18 +216,50 @@ class MyTool(BaseTool):
         }
 ```
 
+### 核心架构要点
+
+- **双层循环引擎**: 外层 REPL 处理用户轮次，内层循环（上限 20 次）处理 LLM Tool Calling
+- **流式响应**: LLMAPI 实时流式输出，按 index 聚合 tool_calls delta
+- **异步优先**: 所有工具 `execute()` 为 async，Agent 通过 `asyncio.run()` 启动
+- **会话持久化**: 每个会话独立 JSON 存储在 `memory/sessions/<id>.json`
+
 ## 项目状态
 
-当前处于 **早期搭建阶段**。工具系统骨架已完成，核心工具（文件操作、搜索、命令执行）可正常使用。上层 Agent Runtime、子代理编排、工作流引擎等模块仍在开发中。
+| 模块 | 状态 |
+|------|------|
+| 核心文件工具（read/write/edit） | ✅ 完整 |
+| Shell 命令执行 | ✅ 完整 |
+| 搜索工具（glob/grep/web_fetch/web_search） | ✅ 完整 |
+| 交互式问答（ask_user） | ✅ 完整 |
+| 任务管理（create/update） | ✅ 完整 |
+| 计划模式（enter_plan_mode） | ✅ 完整 |
+| 子代理（start_agent） | ✅ 完整 |
+| 技能系统（use_skill） | ✅ 完整 |
+| 定时任务（create_cron） | ✅ 完整 |
+| 工作流编排（run_workflow） | ✅ 完整 |
+| Agent 双层循环引擎 | ✅ 完整 |
+| LLM 接口层（流式 + 推理链） | ✅ 完整 |
+| 会话持久化 | ✅ 完整 |
+| 单元测试 | ✅ 104 个测试全部通过 |
 
 ## 技术栈
 
-- **语言**：Python 3.10+
-- **LLM**：OpenAI SDK（兼容接口）
-- **HTTP**：httpx
-- **数据模型**：Pydantic
-- **配置**：JSON（config.json）
-- **测试**：pytest + pytest-asyncio
+| 分类 | 技术 | 用途 |
+|------|------|------|
+| 语言 | Python 3.10+ | 主语言 |
+| LLM SDK | openai >= 2.0 | API 调用 |
+| HTTP | httpx >= 0.28 | HTTP 请求 |
+| 数据模型 | pydantic >= 2.0 | Session / Message |
+| CLI UI | prompt-toolkit >= 3.0 | 交互式输入 |
+| 测试 | pytest >= 9.0 + pytest-asyncio | 单元测试 |
+| 配置 | JSON（config.json） | 运行时配置 |
+
+## 相关文档
+
+- [CLAUDE.md](CLAUDE.md) — AI 助手开发指南（含完整架构说明与开发规范）
+- [ARCHITECTURE.md](ARCHITECTURE.md) — 英文架构设计文档
+- [架构.md](架构.md) — 中文详细架构文档
+- [DScode项目深度技术解析.md](DScode项目深度技术解析.md) — 深度技术解析
 
 ## License
 
