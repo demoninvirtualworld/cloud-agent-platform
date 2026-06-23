@@ -7,7 +7,7 @@
 ## 架构概览
 
 ```
-DScode/
+cloud agent platform
 ├── agent/                  # Agent 核心 — 对话编排层
 │   └── agent.py            #   外层 REPL + 内层 Tool Calling 循环
 ├── llmapi/                 # LLM 客户端 — OpenAI 兼容接口
@@ -47,8 +47,8 @@ DScode/
 
 ```bash
 # 克隆项目
-git clone <your-repo-url>
-cd DScode
+git clone https://github.com/demoninvirtualworld/cloud-agent-platform.git
+cd cloud agent platform
 
 # 创建虚拟环境
 python -m venv venv
