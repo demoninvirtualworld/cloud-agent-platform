@@ -23,7 +23,7 @@ class Agent:
 
     def __init__(
         self,
-        name: str = "cap-agent",
+        name: str = "DScode",
         max_turns: int = 50,
         tool_registry: Optional[ToolRegistry] = None,
         effort: str = "high",

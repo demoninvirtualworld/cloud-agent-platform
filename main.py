@@ -1,28 +1,22 @@
 #!/usr/bin/env python3
 """
-Cloud Agent Platform — CLI 入口
-================================
-基于 Python 的 Agent 工具框架，提供交互式对话代理与会话管理功能。
+DScode — CLI 入口
+=================
+基于 Python 的 AI Agent 工具框架，提供交互式对话代理与会话管理功能。
 
 用法:
-    python main.py create [选项]    创建新会话并启动代理
-    python main.py list             列出所有已保存的会话
-    python main.py resume --id ID   恢复指定会话
-    python main.py delete --id ID   删除指定会话
-    python main.py version          显示版本信息
+    DScode create [选项]    创建新会话并启动代理
+    DScode list             列出所有已保存的会话
+    DScode resume --id ID   恢复指定会话
+    DScode delete --id ID   删除指定会话
+    DScode version          显示版本信息
 """
 
 import argparse
 import asyncio
-import os
 import sys
-from pathlib import Path
 
-from dotenv import load_dotenv
-
-# 确保从项目根目录加载 .env（无论从哪个目录执行）
-_PROJECT_ROOT = Path(__file__).resolve().parent
-load_dotenv(_PROJECT_ROOT / ".env")
+from config import check_llm_config
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +37,7 @@ def _setup_encoding() -> None:
 # ---------------------------------------------------------------------------
 
 VERSION = "0.1.0"
-DESCRIPTION = "Cloud Agent Platform — Python Agent 工具框架"
+DESCRIPTION = "DScode — Python AI Agent 工具框架"
 
 
 # ---------------------------------------------------------------------------
@@ -106,28 +100,12 @@ def create_default_registry():
 
 def check_environment() -> str | None:
     """
-    验证必要的环境变量是否已配置。
+    验证必要的 config.json 配置是否完整。
 
     Returns:
         如果缺少必要配置则返回错误消息，否则返回 None。
     """
-    missing = []
-    if not os.getenv("LLM_MODEL_ID"):
-        missing.append("LLM_MODEL_ID")
-    if not os.getenv("LLM_API_KEY"):
-        missing.append("LLM_API_KEY")
-    if not os.getenv("LLM_BASE_URL"):
-        missing.append("LLM_BASE_URL")
-
-    if missing:
-        return (
-            f"缺少必要的环境变量: {', '.join(missing)}\n"
-            "请在 .env 文件中配置以下变量:\n"
-            "  LLM_MODEL_ID=your-model-id\n"
-            "  LLM_API_KEY=your-api-key\n"
-            "  LLM_BASE_URL=https://api.example.com/v1"
-        )
-    return None
+    return check_llm_config()
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +235,7 @@ def cmd_delete(args: argparse.Namespace) -> None:
 
 def cmd_version(args: argparse.Namespace) -> None:
     """显示版本信息。"""
-    print(f"Cloud Agent Platform v{VERSION}")
+    print(f"DScode v{VERSION}")
     print(f"Python {sys.version}")
 
 
@@ -269,17 +247,23 @@ def cmd_version(args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     """构建命令行参数解析器。"""
     parser = argparse.ArgumentParser(
-        prog="cap",
+        prog="DScode",
         description=DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python main.py create                         创建新会话
-  python main.py create --name my-agent --effort medium
-  python main.py list                           列出会话
-  python main.py resume --id abc123def456        恢复会话
-  python main.py delete --id abc123def456        删除会话
+  DScode                        启动交互式对话
+  DScode create                 创建新会话
+  DScode create --name my-agent --effort medium
+  DScode list                   列出会话
+  DScode resume --id abc123def456  恢复会话
+  DScode delete --id abc123def456  删除会话
+  DScode version                显示版本信息
         """,
+    )
+
+    parser.add_argument(
+        "-v", "--version", action="version", version=f"DScode v{VERSION}"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
@@ -287,7 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
     # ---- create ----
     create_parser = subparsers.add_parser("create", help="创建新会话")
     create_parser.add_argument(
-        "--name", default="cap-agent", help="代理名称 (默认: cap-agent)"
+        "--name", default="DScode", help="代理名称 (默认: DScode)"
     )
     create_parser.add_argument(
         "--session", default=None, help="会话名称 (默认: 自动生成)"
@@ -339,18 +323,41 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """CLI 主入口。"""
     _setup_encoding()
+
+    # 处理常见拼写错误：-version → --version
+    if "-version" in sys.argv:
+        sys.argv[sys.argv.index("-version")] = "--version"
+
     parser = build_parser()
-    args = parser.parse_args()
+
+    try:
+        args = parser.parse_args()
+    except SystemExit as e:
+        # argparse 在错误/帮助时抛出 SystemExit
+        # Windows 下防止闪退：错误时暂停
+        if e.code != 0:
+            input("\n按 Enter 键退出...")
+        raise
 
     # 无子命令时默认启动交互式对话
     if args.command is None:
         create_args = argparse.Namespace(
-            name="cap-agent",
+            name="DScode",
             session=None,
             max_turns=50,
             effort="high",
         )
-        cmd_create(create_args)
+        try:
+            cmd_create(create_args)
+        except (Exception, SystemExit) as e:
+            if isinstance(e, SystemExit) and e.code == 0:
+                raise
+            if isinstance(e, SystemExit):
+                print(f"\n❌ 启动失败 (错误码 {e.code})")
+            else:
+                print(f"\n❌ 启动失败: {e}")
+            input("\n按 Enter 键退出...")
+            sys.exit(1)
         return
 
     # 命令分发
@@ -364,7 +371,17 @@ def main() -> None:
 
     handler = handlers.get(args.command)
     if handler:
-        handler(args)
+        try:
+            handler(args)
+        except (Exception, SystemExit) as e:
+            if isinstance(e, SystemExit) and e.code == 0:
+                raise
+            if isinstance(e, SystemExit):
+                print(f"\n❌ 命令执行失败 (错误码 {e.code})")
+            else:
+                print(f"\n❌ 命令执行失败: {e}")
+            input("\n按 Enter 键退出...")
+            sys.exit(1)
     else:
         print(f"❌ 未知命令: {args.command}")
         parser.print_help()

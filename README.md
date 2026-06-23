@@ -1,11 +1,11 @@
-# Cloud Agent Platform
+# DScode
 
 基于 Python 的 AI Agent 工具框架，对标 Claude Code 工具系统设计。支持 LLM 对话、工具调用（Function Calling）、会话持久化，提供交互式命令行界面。
 
 ## 架构概览
 
 ```
-cloud-agent-platform/
+DScode/
 ├── agent/                  # Agent 核心 — 对话编排层
 │   └── agent.py            #   外层 REPL + 内层 Tool Calling 循环
 ├── tools/                  # 工具系统 — 16 个可扩展工具
@@ -17,6 +17,7 @@ cloud-agent-platform/
 │   └── manager.py          #   SessionManager CRUD 操作
 ├── llmapi/                 # LLM 客户端 — OpenAI 兼容接口
 │   └── LLMAPI.py           #   流式响应、工具调用、推理链支持
+├── config.py               # 配置管理 — 从 config.json 加载
 ├── tests/                  # 单元测试 — 覆盖核心模块
 ├── memory/sessions/        # 会话持久化存储（JSON 文件）
 ├── main.py                 # CLI 入口（argparse 子命令）
@@ -38,7 +39,7 @@ cloud-agent-platform/
 ```bash
 # 克隆项目
 git clone <your-repo-url>
-cd cloud-agent-platform
+cd DScode
 
 # 创建虚拟环境
 python -m venv venv
@@ -49,51 +50,49 @@ venv\Scripts\activate
 # Linux / macOS:
 source venv/bin/activate
 
-# 安装依赖
-pip install -r requirements.txt
-
-# 安装项目（可选，安装后可在任意目录使用 cap 命令）
+# 安装依赖 + 项目（安装后可在任意目录使用 DScode 命令）
 pip install -e .
 ```
 
 ### 配置
 
-在项目根目录创建 `.env` 文件（或复制 `.env.example`）：
+在项目根目录创建 `config.json` 文件（或复制 `config.json.example`）：
 
-```env
-LLM_MODEL_ID="deepseek-v4-pro"
-LLM_API_KEY="your-api-key-here"
-LLM_BASE_URL="https://api.deepseek.com"
-LLM_TIMEOUT=60
+```json
+{
+    "llm": {
+        "model_id": "deepseek-v4-pro",
+        "api_key": "your-api-key-here",
+        "base_url": "https://api.deepseek.com",
+        "timeout": 60
+    }
+}
 ```
 
-| 变量 | 说明 |
+| 字段 | 说明 |
 |------|------|
-| `LLM_MODEL_ID` | 模型 ID，如 `deepseek-v4-pro`、`gpt-4o` |
-| `LLM_API_KEY` | API 密钥 |
-| `LLM_BASE_URL` | API 服务地址 |
-| `LLM_TIMEOUT` | 请求超时秒数（默认 60） |
+| `llm.model_id` | 模型 ID，如 `deepseek-v4-pro`、`gpt-4o` |
+| `llm.api_key` | API 密钥 |
+| `llm.base_url` | API 服务地址 |
+| `llm.timeout` | 请求超时秒数（默认 60） |
 
 ### 运行
 
 ```bash
-# 方式一：安装后使用 CLI 命令（推荐）
-cap create                          # 创建新会话
-cap create --name my-agent --effort high --max-turns 100
-cap list                            # 列出所有已保存会话
-cap resume --id <session-id>        # 恢复指定会话
-cap delete --id <session-id>        # 删除指定会话
-cap version                         # 显示版本信息
-
-# 方式二：直接运行脚本
-python main.py create
-python main.py list
+# 安装后，在任意目录直接输入 DScode 即可启动（推荐）
+DScode                              # 默认创建新会话
+DScode create                       # 创建新会话
+DScode create --name my-agent --effort high --max-turns 100
+DScode list                         # 列出所有已保存会话
+DScode resume --id <session-id>     # 恢复指定会话
+DScode delete --id <session-id>     # 删除指定会话
+DScode version                      # 显示版本信息
 ```
 
 启动后会进入交互式对话界面：
 
 ```
-cap-agent 代理启动！
+DScode 代理启动！
    工具数量: 16
    最大轮数: 50
    思考力度: high
@@ -106,7 +105,7 @@ You: 帮我分析项目结构
 🔧 glob_search → 搜索 **/*
    ✅ 成功 — 匹配 45 个文件
 🔧 read_file → 读取 main.py
-   ✅ 成功 — 读取第 1-375 行 (共 375 行)
+   ✅ 成功 — 读取第 1-353 行 (共 353 行)
 ...
 ```
 
@@ -195,7 +194,7 @@ class MyTool(BaseTool):
 - **LLM**：OpenAI SDK（兼容接口）
 - **HTTP**：httpx
 - **数据模型**：Pydantic
-- **配置**：python-dotenv
+- **配置**：JSON（config.json）
 - **测试**：pytest + pytest-asyncio
 
 ## License

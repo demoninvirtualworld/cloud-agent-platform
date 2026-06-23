@@ -1,24 +1,26 @@
 [project]
-name = "cloud-agent-platform"
+name = "DScode"
 version = "0.1.0"
-description = "Cloud Agent Platform — 基于 Python 的 Agent 工具框架"
+description = "DScode — 基于 Python 的 AI Agent 工具框架"
 requires-python = ">=3.10"
 dependencies = [
     "openai>=2.0",
     "httpx>=0.28",
     "pydantic>=2.0",
-    "python-dotenv>=1.0",
 ]
 
 [project.scripts]
-cap = "main:main"
-cap-agent = "main:main"
+DScode = "main:main"
 
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0",
     "pytest-asyncio>=1.0",
 ]
+
+[tool.setuptools]
+packages = ["agent", "llmapi", "session", "tools"]
+py-modules = ["config", "main"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

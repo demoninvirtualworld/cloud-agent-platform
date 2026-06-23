@@ -1,13 +1,8 @@
-import os
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
-from dotenv import load_dotenv
 
-# 加载 .env 文件中的环境变量（从项目根目录查找）
-_project_root = Path(__file__).resolve().parent.parent
-load_dotenv(_project_root / ".env")
+from config import get_llm_config
 
 
 class LLMAPI:
@@ -23,15 +18,18 @@ class LLMAPI:
         baseUrl: str = None,
         timeout: int = None,
     ):
-        """初始化客户端。优先使用传入参数，如果未提供，则从环境变量加载。"""
-        self.model = model or os.getenv("LLM_MODEL_ID")
-        apiKey = apiKey or os.getenv("LLM_API_KEY")
-        baseUrl = baseUrl or os.getenv("LLM_BASE_URL")
-        timeout = timeout or int(os.getenv("LLM_TIMEOUT", 60))
+        """初始化客户端。优先使用传入参数，如果未提供，则从 config.json 加载。"""
+        llm_config = get_llm_config()
+
+        self.model = model or llm_config["model_id"]
+        apiKey = apiKey or llm_config["api_key"]
+        baseUrl = baseUrl or llm_config["base_url"]
+        timeout = timeout or llm_config["timeout"]
 
         if not all([self.model, apiKey, baseUrl]):
             raise ValueError(
-                "模型ID、API密钥和服务地址必须被提供或在.env文件中定义。"
+                "模型ID、API密钥和服务地址必须被提供或在 config.json 中定义。"
+                "请复制 config.json.example 为 config.json 并填入配置。"
             )
 
         self.client = OpenAI(api_key=apiKey, base_url=baseUrl, timeout=timeout)
