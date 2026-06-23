@@ -1,0 +1,29 @@
+[project]
+name = "cloud-agent-platform"
+version = "0.1.0"
+description = "Cloud Agent Platform — 基于 Python 的 Agent 工具框架"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=2.0",
+    "httpx>=0.28",
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+cap = "main:main"
+cap-agent = "main:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"
