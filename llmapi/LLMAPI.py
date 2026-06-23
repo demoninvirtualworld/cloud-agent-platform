@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI
 
 from config import get_llm_config
+from ui.spinner import Spinner
 
 
 class LLMAPI:
@@ -58,8 +59,6 @@ class LLMAPI:
                 "tool_calls": Optional[List[dict]],  # 工具调用列表
             }
         """
-        print(f"🧠 正在调用 {self.model} 模型...")
-
         # 构建请求参数
         request_kwargs: Dict[str, Any] = {
             "model": self.model,
@@ -87,50 +86,65 @@ class LLMAPI:
             tool_calls_accumulator: Dict[int, Dict[str, Any]] = {}
             finish_reason: Optional[str] = None
 
-            for chunk in response:
-                if not chunk.choices:
-                    continue
+            # 旋转计时器：在等待首字节到达期间显示实时进度
+            spinner = Spinner(f"正在调用 {self.model} 模型...")
+            spinner.start()
+            first_chunk_arrived = False
 
-                delta = chunk.choices[0].delta
+            try:
+                for chunk in response:
+                    if not chunk.choices:
+                        continue
 
-                # 累积文本内容
-                if delta.content:
-                    collected_content.append(delta.content)
-                    print(delta.content, end="", flush=True)
+                    delta = chunk.choices[0].delta
 
-                # 累积推理链内容（DeepSeek / extended thinking 模型）
-                reasoning = getattr(delta, "reasoning_content", None)
-                if reasoning is None and hasattr(delta, "model_extra"):
-                    reasoning = (delta.model_extra or {}).get(
-                        "reasoning_content", ""
-                    )
-                if reasoning:
-                    collected_reasoning.append(reasoning)
+                    # 首字节到达 → 停止旋转计时器
+                    if not first_chunk_arrived:
+                        spinner.stop()
+                        first_chunk_arrived = True
 
-                # 累积 tool_calls（流式返回为增量 delta，需按 index 聚合）
-                if delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        idx = tc.index
-                        if idx not in tool_calls_accumulator:
-                            tool_calls_accumulator[idx] = {
-                                "id": "",
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""},
-                            }
-                        entry = tool_calls_accumulator[idx]
-                        if tc.id:
-                            entry["id"] = tc.id
-                        if tc.function:
-                            if tc.function.name:
-                                entry["function"]["name"] += tc.function.name
-                            if tc.function.arguments:
-                                entry["function"]["arguments"] += (
-                                    tc.function.arguments
-                                )
+                    # 累积文本内容
+                    if delta.content:
+                        collected_content.append(delta.content)
+                        print(delta.content, end="", flush=True)
 
-                # 捕获 finish_reason
-                if chunk.choices[0].finish_reason:
-                    finish_reason = chunk.choices[0].finish_reason
+                    # 累积推理链内容（DeepSeek / extended thinking 模型）
+                    reasoning = getattr(delta, "reasoning_content", None)
+                    if reasoning is None and hasattr(delta, "model_extra"):
+                        reasoning = (delta.model_extra or {}).get(
+                            "reasoning_content", ""
+                        )
+                    if reasoning:
+                        collected_reasoning.append(reasoning)
+
+                    # 累积 tool_calls（流式返回为增量 delta，需按 index 聚合）
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            idx = tc.index
+                            if idx not in tool_calls_accumulator:
+                                tool_calls_accumulator[idx] = {
+                                    "id": "",
+                                    "type": "function",
+                                    "function": {"name": "", "arguments": ""},
+                                }
+                            entry = tool_calls_accumulator[idx]
+                            if tc.id:
+                                entry["id"] = tc.id
+                            if tc.function:
+                                if tc.function.name:
+                                    entry["function"]["name"] += tc.function.name
+                                if tc.function.arguments:
+                                    entry["function"]["arguments"] += (
+                                        tc.function.arguments
+                                    )
+
+                    # 捕获 finish_reason
+                    if chunk.choices[0].finish_reason:
+                        finish_reason = chunk.choices[0].finish_reason
+            finally:
+                # 确保 spinner 在任何情况下都被停止（异常、无 chunk、循环结束）
+                if not first_chunk_arrived:
+                    spinner.stop("⚠️ 未收到响应")
 
             print()  # 流式输出结束后换行
 

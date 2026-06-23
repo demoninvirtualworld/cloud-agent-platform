@@ -1,13 +1,13 @@
-"""创建任务工具。"""
+"""创建任务工具 — 内存存储 + 辅助查询方法。"""
 
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from .base import BaseTool, ToolResult
 
 
-# 任务的内存存储（后续可改为持久化存储）
+# 任务的内存存储（跨工具共享，进程级生命周期）
 _task_store: Dict[str, Dict[str, Any]] = {}
 
 
@@ -32,6 +32,8 @@ class TaskCreateTool(BaseTool):
             "activeForm": active_form,
             "status": "pending",
             "metadata": metadata or {},
+            "blocks": [],
+            "blockedBy": [],
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
         }
@@ -47,6 +49,62 @@ class TaskCreateTool(BaseTool):
                 "total_tasks": len(_task_store),
             },
         )
+
+    # ------------------------------------------------------------------
+    # 辅助查询（供其他工具或测试使用）
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def list_tasks(
+        status_filter: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """列出所有任务，可按状态过滤。
+
+        Args:
+            status_filter: 可选的状态过滤器（pending / in_progress / completed / deleted）
+
+        Returns:
+            任务摘要列表（按创建时间排序）
+        """
+        tasks = list(_task_store.values())
+        if status_filter:
+            tasks = [t for t in tasks if t.get("status") == status_filter]
+        tasks.sort(key=lambda t: t.get("created_at", ""))
+        return [
+            {
+                "id": t["id"],
+                "subject": t["subject"],
+                "status": t["status"],
+                "description": t.get("description", "")[:100],
+            }
+            for t in tasks
+        ]
+
+    @staticmethod
+    def get_task(task_id: str) -> Optional[Dict[str, Any]]:
+        """获取单个任务详情。"""
+        return _task_store.get(task_id)
+
+    @staticmethod
+    def delete_task(task_id: str) -> bool:
+        """删除指定任务（同时清理其他任务中的依赖引用）。"""
+        if task_id not in _task_store:
+            return False
+
+        # 清理依赖引用
+        for t in _task_store.values():
+            if task_id in t.get("blocks", []):
+                t["blocks"].remove(task_id)
+            if task_id in t.get("blockedBy", []):
+                t["blockedBy"].remove(task_id)
+
+        del _task_store[task_id]
+        return True
+
+    @staticmethod
+    def clear_all() -> None:
+        """清空所有任务（主要用于测试清理）。"""
+        _task_store.clear()
 
     def get_schema(self) -> Dict[str, Any]:
         return {

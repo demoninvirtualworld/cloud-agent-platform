@@ -2,10 +2,14 @@
 
 import asyncio
 import json
+import os
+import sys
 from typing import Any, Dict, List, Optional
 
 from llmapi.LLMAPI import LLMAPI
 from tools.registry import ToolRegistry
+from ui.input_handler import InputSession
+from ui.spinner import Spinner
 
 
 class Agent:
@@ -35,6 +39,12 @@ class Agent:
         self.effort = effort
         self.turn_count = 0
 
+        # 设为全局活跃注册表（供子代理等使用）
+        self.tool_registry.set_active()
+
+        # 美化的终端输入
+        self._input_session = InputSession()
+
         # messages 归属于 Agent，跨越内外循环保留完整对话历史
         self.messages: List[Dict[str, Any]] = []
         self._init_system_prompt()
@@ -52,18 +62,33 @@ class Agent:
                 print(f"\n已达到最大对话轮数 ({self.max_turns})，会话结束。")
                 break
 
+            # 重置顶部装饰线（每轮输入前）
+            self._input_session.reset_deco()
+
             try:
-                query = (await asyncio.to_thread(input, "\nYou: ")).strip()
+                query = await asyncio.to_thread(self._input_session.prompt)
             except (EOFError, KeyboardInterrupt):
                 print("\n\n会话已中断。")
                 break
 
+            if query is None:
+                # Ctrl+D 退出
+                print("\n\n会话已中断。")
+                break
+
+            query = query.strip()
+
             if not query:
                 continue
 
-            if query.lower() in ("exit", "quit"):
-                print("再见！")
-                break
+            # 处理内置命令（以 / 开头）
+            if query.startswith("/"):
+                result = await self._handle_command(query)
+                if result == "continue":
+                    continue
+                elif result == "exit":
+                    break
+                # result 为 None：不是已知命令，当作普通文本发送给 LLM
 
             # 用户消息加入历史
             self.messages.append({"role": "user", "content": query})
@@ -143,7 +168,10 @@ class Agent:
 
                     self._print_tool_before(tool_name, tool_args)
 
+                    tool_spinner = Spinner(f"执行 {tool_name}...")
+                    tool_spinner.start()
                     tool_result_str = await self._execute_tool(tool_name, tool_args)
+                    tool_spinner.stop(silent=True)
 
                     self._print_tool_after(tool_name, tool_args, tool_result_str)
 
@@ -162,6 +190,9 @@ class Agent:
     # 工具执行
     # ------------------------------------------------------------------
 
+    # 计划模式下受限的工具
+    _PLAN_RESTRICTED_TOOLS = {"write_file", "edit_file", "run_bash"}
+
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
         """查找工具并执行，将 ToolResult 序列化为 JSON 字符串返回。"""
         tool = self.tool_registry.get(tool_name)
@@ -172,6 +203,27 @@ class Agent:
                 ensure_ascii=False,
                 default=str,
             )
+
+        # ── 计划模式拦截 ──
+        try:
+            from tools.enter_plan_mode import is_active, is_locked
+            if (
+                is_active()
+                and not is_locked()
+                and tool_name in self._PLAN_RESTRICTED_TOOLS
+            ):
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": (
+                            f"当前处于计划模式，工具 '{tool_name}' 被限制。"
+                            "请先让用户审查方案，批准后调用 enter_plan_mode(locked=true) 解锁。"
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+        except Exception:
+            pass  # 如果模块加载失败，不阻止执行
 
         try:
             result = await tool.execute(**tool_args)
@@ -304,6 +356,96 @@ class Agent:
 
         self.messages.append({"role": "system", "content": system_text})
 
+    # ------------------------------------------------------------------
+    # 内置命令处理
+    # ------------------------------------------------------------------
+
+    async def _handle_command(self, text: str) -> Optional[str]:
+        """
+        处理以 / 开头的内容命令。
+
+        Returns:
+            "exit"     — 退出循环
+            "continue" — 已处理，继续循环
+            None       — 不是已知命令，作为普通文本处理（发送给 LLM）
+        """
+        parts = text.split(maxsplit=1)
+        cmd = parts[0].lower()
+        arg = parts[1] if len(parts) > 1 else ""
+
+        if cmd in ("/exit", "/quit"):
+            print("再见！")
+            return "exit"
+
+        if cmd == "/help":
+            self._print_command_help()
+            return "continue"
+
+        if cmd == "/clear":
+            os.system("cls" if os.name == "nt" else "clear")
+            return "continue"
+
+        if cmd == "/save":
+            await self._save_session()
+            return "continue"
+
+        if cmd == "/version":
+            from main import VERSION
+            print(f"\nDScode v{VERSION}")
+            print(f"Python {sys.version}")
+            print(f"工具数量: {len(self.tool_registry.list_tools())}")
+            return "continue"
+
+        # 未知命令 — 不作为命令处理，发送给 LLM
+        return None
+
+    def _print_command_help(self) -> None:
+        """打印内置命令帮助。"""
+        help_text = """
+内置命令:
+  /exit, /quit    退出对话
+  /help           显示此帮助信息
+  /clear          清屏
+  /save           保存当前会话
+  /version        显示版本信息
+
+提示:
+  @文件名   — 使用 Tab 键自动补全文件路径
+  /命令     — 使用 Tab 键自动补全命令
+  Alt+Enter — 输入换行
+  Ctrl+D    — 退出
+"""
+        print(help_text)
+
+    async def _save_session(self) -> None:
+        """保存当前会话到 JSON 文件。"""
+        try:
+            from session.manager import SessionManager
+            from session.models import Session, Message
+
+            manager = SessionManager()
+            # 将内部 dict 格式消息转换为 Message 模型
+            msg_objects = []
+            for m in self.messages:
+                msg_objects.append(Message(
+                    role=m.get("role", ""),
+                    content=m.get("content"),
+                    tool_calls=m.get("tool_calls"),
+                    tool_call_id=m.get("tool_call_id"),
+                    name=m.get("name"),
+                    reasoning_content=m.get("reasoning_content"),
+                ))
+            session = Session(
+                agent_name=self.name,
+                max_turns=self.max_turns,
+                messages=msg_objects,
+                turn_count=self.turn_count,
+            )
+            manager.save(session)
+            print(f"\n✅ 会话已保存: {session.id}")
+        except Exception as e:
+            print(f"\n❌ 保存失败: {e}")
+
     def _print_welcome(self) -> None:
         """打印启动信息。"""
         tool_count = len(self.tool_registry.list_tools())
@@ -311,5 +453,5 @@ class Agent:
         print(f"   工具数量: {tool_count}")
         print(f"   最大轮数: {self.max_turns}")
         print(f"   思考力度: {self.effort}")
-        print("\n输入 'exit' 或 'quit' 退出对话。")
-        print("-" * 50)
+        print("\n输入 /help 查看可用命令，Tab 键自动补全。")
+        self._input_session.reset_deco()

@@ -4,6 +4,9 @@ from typing import Any, Dict, List, Optional
 
 from .base import BaseTool
 
+# 全局活跃注册表引用（供子代理等跨上下文访问）
+_active_registry: Optional["ToolRegistry"] = None
+
 
 class ToolRegistry:
     """全局工具注册表，用于注册、查找和获取工具。"""
@@ -41,3 +44,13 @@ class ToolRegistry:
     def clear(self) -> None:
         """清空注册表。"""
         self._tools.clear()
+
+    def set_active(self) -> None:
+        """将当前注册表设置为全局活跃实例。"""
+        global _active_registry
+        _active_registry = self
+
+    @staticmethod
+    def get_active() -> Optional["ToolRegistry"]:
+        """获取全局活跃注册表实例。"""
+        return _active_registry

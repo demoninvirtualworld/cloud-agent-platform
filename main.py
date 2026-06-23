@@ -15,6 +15,13 @@ DScode — CLI 入口
 import argparse
 import asyncio
 import sys
+from pathlib import Path
+
+# 将项目根目录添加到 sys.path，确保在任何目录下运行时都能找到本地模块
+# （如 config, agent, ui, tools, session, llmapi 等）
+_project_root = Path(__file__).resolve().parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
 from config import check_llm_config
 
