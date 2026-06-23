@@ -1,6 +1,6 @@
 # DScode
 
-基于 Python 的 AI Agent 工具框架，对标 Claude Code 工具系统设计。支持 LLM 对话、工具调用（Function Calling）、会话持久化，提供交互式命令行界面。
+基于 Python 的 AI Agent 工具框架，对标 Claude Code 工具系统设计。支持 LLM 对话、工具调用（Function Calling）、会话持久化，提供美化的交互式命令行界面。
 
 ## 架构概览
 
@@ -8,6 +8,10 @@
 DScode/
 ├── agent/                  # Agent 核心 — 对话编排层
 │   └── agent.py            #   外层 REPL + 内层 Tool Calling 循环
+├── ui/                     # 终端交互界面
+│   ├── input_handler.py    #   美化输入框（prompt_toolkit / 回退）
+│   ├── completer.py        #   / 命令补全 + @ 文件补全
+│   └── spinner.py          #   旋转计时器（长时间操作进度反馈）
 ├── tools/                  # 工具系统 — 16 个可扩展工具
 │   ├── base.py             #   BaseTool 抽象基类 + ToolResult 统一返回
 │   ├── registry.py         #   ToolRegistry 注册表（注册/查找/枚举/清空）
@@ -18,7 +22,7 @@ DScode/
 ├── llmapi/                 # LLM 客户端 — OpenAI 兼容接口
 │   └── LLMAPI.py           #   流式响应、工具调用、推理链支持
 ├── config.py               # 配置管理 — 从 config.json 加载
-├── tests/                  # 单元测试 — 覆盖核心模块
+├── tests/                  # 单元测试 — 104 个测试全覆盖
 ├── memory/sessions/        # 会话持久化存储（JSON 文件）
 ├── main.py                 # CLI 入口（argparse 子命令）
 ├── pyproject.toml          # 项目元数据与依赖
@@ -89,7 +93,9 @@ DScode delete --id <session-id>     # 删除指定会话
 DScode version                      # 显示版本信息
 ```
 
-启动后会进入交互式对话界面：
+### 交互界面
+
+启动后进入美化交互式对话界面：
 
 ```
 DScode 代理启动！
@@ -97,16 +103,71 @@ DScode 代理启动！
    最大轮数: 50
    思考力度: high
 
-输入 'exit' 或 'quit' 退出对话。
---------------------------------------------------
+输入 /help 查看可用命令，Tab 键自动补全。
 
-You: 帮我分析项目结构
-🧠 正在调用 deepseek-v4-pro 模型...
-🔧 glob_search → 搜索 **/*
-   ✅ 成功 — 匹配 45 个文件
-🔧 read_file → 读取 main.py
-   ✅ 成功 — 读取第 1-353 行 (共 353 行)
-...
+──────────────────────────────────────────────────────────────────
+> 帮我分析项目结构                                     ← 绿色 > 提示符
+──────────────────────────────────── Tab:补全  Ctrl+D:退出
+```
+
+**输入特性**：
+- `/` + **Tab** — 弹出命令补全菜单（/help、/exit、/save、/clear、/version）
+- `@` + **Tab** — 弹出文件路径补全菜单
+- **Alt+Enter** — 插入换行
+- **Ctrl+D** — 退出对话
+- 原生 Windows 控制台（CMD / Windows Terminal）：完整的 prompt_toolkit 增强体验
+- IDE 内置终端 / Git Bash：自动回退到基本模式，保证兼容性
+
+### 内置命令
+
+| 命令 | 说明 |
+|------|------|
+| `/help` | 显示帮助信息 |
+| `/exit`, `/quit` | 退出对话 |
+| `/clear` | 清屏 |
+| `/save` | 保存当前会话到磁盘 |
+| `/version` | 显示版本信息 |
+
+## 系统架构
+
+### 双层循环设计
+
+```
+┌─ 外层循环（REPL）─────────────────────────────────┐
+│  while True:                                       │
+│    query = await input("> ")   ← 用户输入          │
+│    if query == "/exit": break                      │
+│    messages.append({"role":"user", "content":...}) │
+│    await _run_turn()           ← 进入内层          │
+│    turn_count += 1                                 │
+└────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─ 内层循环（Tool Calling）──────────────────────────┐
+│  for _ in range(20):           ← 安全上限          │
+│    result = llm.think(messages, tools)             │
+│    if stop:  break              ← LLM 回答完毕     │
+│    if tool_calls:                                    │
+│      for each tool_call:                            │
+│        execute_tool()           ← 执行工具          │
+│        messages.append(result)  ← 结果回传          │
+│      continue                   ← 继续消化          │
+└────────────────────────────────────────────────────┘
+```
+
+关键设计决策：
+- **messages 归属 Agent**：跨内外循环保留完整上下文，LLM 能看到所有历史工具调用
+- **内循环安全上限 20**：防止工具调用无限循环
+- **async 全链路**：Agent → LLM → Tool 全部异步，输入通过 `asyncio.to_thread` 桥接同步的 prompt_toolkit
+
+### 终端适配策略
+
+```
+启动 → 检测终端类型
+  ├─ GetConsoleWindow() != 0 → 增强模式
+  │   └─ prompt_toolkit（补全菜单、样式化输入）
+  └─ GetConsoleWindow() == 0 → 回退模式
+      └─ 内置 input() + 装饰线
 ```
 
 ## 可用工具
@@ -116,7 +177,7 @@ You: 帮我分析项目结构
 | `read_file` | ✅ 完整 | 读取文件内容，支持分页和行范围 |
 | `write_file` | ✅ 完整 | 写入内容到指定文件 |
 | `edit_file` | ✅ 完整 | 精确字符串替换编辑（单次/全部） |
-| `run_bash` | ✅ 完整 | 执行 Shell 命令，支持超时控制 |
+| `run_bash` | ✅ 完整 | 跨平台 Shell 命令，自动检测 Git Bash |
 | `glob_search` | ✅ 完整 | Glob 模式匹配搜索文件 |
 | `grep_search` | ✅ 完整 | 正则表达式内容搜索（3 种输出模式） |
 | `web_fetch` | ✅ 完整 | 获取 URL 内容（HTTP/HTTPS） |
@@ -130,13 +191,28 @@ You: 帮我分析项目结构
 | `create_cron` | ⚠️ 骨架 | 创建定时任务 |
 | `run_workflow` | ⚠️ 骨架 | 执行多代理工作流 |
 
+### run_bash 跨平台支持
+
+DScode 会自动检测系统上的 Git Bash，优先使用 bash 执行命令：
+
+```
+Windows 检测流程:
+  1. 查找 bash（PATH → E:\Git → C:\Program Files\Git）
+  2. 排除 WSL 存根（C:\Windows\System32\bash.exe）
+  3. 验证 bash --version 可用
+  4. 可用 → create_subprocess_exec(bash, "-c", cmd)
+     不可用 → create_subprocess_shell(cmd)  [默认 cmd.exe]
+```
+
+工具描述会根据检测结果动态调整——bash 可用时告诉 LLM 使用 Unix 命令，不可用时提示使用 Windows 命令。
+
 ## 运行测试
 
 ```bash
 # 安装开发依赖
 pip install -e ".[dev]"
 
-# 运行全部测试
+# 运行全部测试（104 个）
 pytest
 
 # 运行指定测试模块
@@ -145,6 +221,12 @@ pytest tests/test_tools_registry.py -v
 # 运行单个测试类
 pytest tests/test_session_manager.py::TestLoad -v
 ```
+
+测试覆盖：
+- `tests/test_tools_base.py` — BaseTool 抽象基类、ToolResult 数据类
+- `tests/test_tools_registry.py` — ToolRegistry 注册/查找/枚举/清空
+- `tests/test_session_models.py` — Message / Session Pydantic 模型
+- `tests/test_session_manager.py` — SessionManager CRUD 操作
 
 ## 扩展开发
 
@@ -184,18 +266,17 @@ class MyTool(BaseTool):
         }
 ```
 
-## 项目状态
-
-当前处于 **早期搭建阶段**。工具系统骨架已完成，核心工具（文件操作、搜索、命令执行）可正常使用。上层 Agent Runtime、子代理编排、工作流引擎等模块仍在开发中。
-
 ## 技术栈
 
-- **语言**：Python 3.10+
-- **LLM**：OpenAI SDK（兼容接口）
-- **HTTP**：httpx
-- **数据模型**：Pydantic
-- **配置**：JSON（config.json）
-- **测试**：pytest + pytest-asyncio
+| 层级 | 技术 | 说明 |
+|------|------|------|
+| 语言 | Python 3.10+ | 类型注解、async/await、dataclass |
+| LLM | OpenAI SDK | 流式响应、Function Calling、推理链 |
+| HTTP | httpx | web_fetch 工具 |
+| 数据模型 | Pydantic v2 | Session / Message 序列化与校验 |
+| 终端 UI | prompt_toolkit | 美化输入框、补全菜单、键位绑定 |
+| 配置 | JSON (config.json) | 模型 ID、API Key、超时等 |
+| 测试 | pytest + pytest-asyncio | 异步测试支持 |
 
 ## License
 
